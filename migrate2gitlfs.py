@@ -661,9 +661,9 @@ Examples:
     print("Your LFS repo is ready:")
     print(target_repo_path)
     print("Next steps:")
-    print("  git remote add origin git@server.com:path/{os.path.basename(target_repo_path)}.git")
-    print("  git branch -M {args.branch}")
-    print("  git push -u origin {args.branch}")
+    print(f"  git remote add origin git@server.com:path/{os.path.basename(target_repo_path)}.git")
+    print(f"  git branch -M {args.branch}")
+    print(f"  git push -u origin {args.branch}")
 
   # everything ok!
   sys.exit(0)
