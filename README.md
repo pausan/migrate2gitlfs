@@ -8,15 +8,34 @@ First analyze the repository to let the tool find out LFS candidate files,
 review the configuration created, and then migrate the repo.
 
 ```sh
-$ python analyze 
+$ python3 migrate2gitlfs.py analyze --branch main -v local_repo
+$ python3 migrate2gitlfs.py migrate --branch main -v local_repo
 ```
 
+This tool works only with local repos, although if a remote repo is provided
+it will download it to a local folder.
+
+```sh
+$ python3 migrate2gitlfs.py analyze -v git@github.com:pausan/cblack.git
+$ python3 migrate2gitlfs.py migrate -v git@github.com:pausan/cblack.git
+```
+
+In this latter case, when cloning cblack repo, the following new files and
+folders will be created:
+
+- ./cblack.git
+- ./cblack.git-config.json
+- ./cblack.git-config.json
+
+Three repositories will be created. Speed and simplicity comes at a cost with
+this tool, you'll need 3x the space. The original repo (which will remain
+untouched), the cloned repo, on which commits will be replayed, and the lfs
+repo, which is the final LFS repo with the rewritten history.
 
 ## Intro
 
-The main use-case is when you are trying to migrate a repository from another
-control version tool, such as subversion or perforce, and then you want to
-convert it to LFS.
+The main use-case is to migrate a repository from another control version tool,
+such as subversion or perforce, and then you want to convert it to LFS.
 
 ### Why?
 
@@ -73,9 +92,76 @@ contain other files.
 This mode will also find candidate files to be deleted and/or will warn you
 about other stuff.
 
+After you run this mode, you can edit the json file in order to set your
+preferences and adjust migrate behavoiur.
+
+Sample:
+
+```json
+{
+  "authors": {
+    "Pau <contact@pausanchez.com>": {
+      "name": "Pau Sanchez",
+      "email": "contact@pausanchez.com"
+    },
+  },
+  "warnings": [
+    "File can contain sensitive info: path/to/secret.cer",
+  ],
+  "history_delete_files": [
+    "path/file/to/be/removed.json"
+  ],
+  "history_replace_files": {
+    "path/to/secrets.json": {
+      "search": "case-sensitive-string-to-search",
+      "replace": "xxxx"
+    }
+  },
+  "lfs_patterns": "default",
+  "extra_lfs_patterns": [
+    "path/to/large-binary-file",
+    "*.bin"
+  ]
+}
+```
+
+- **authors**: This the mapping of name and email as it appears on git history
+  in the original/cloned repo, and the name/email you want to use in the new
+  rewritten lfs repo
+
+- **warnings**: List of warnings or things you should be aware of when
+  converting this project into lfs. The warnings are in textual form. This tool
+  might detect secret files that you might want to delete, but it is up to you
+  to act on these warnings.
+
+- **history_delete_files**: List of paths/files that you'd like to be deleted
+  from history. Please note that only specified paths will be deleted. If a file
+  was added as path/to/file1.cer and later moved to path/to/secret.cer and you
+  specified the latter, only the latter will be deleted, thus, you should add
+  all files. This field does not allow patterns, just full paths.
+
+- **history_replace_files**: List of files and search/replace patterns to 
+  perform a search and replace for specific case-sensitive patterns in specified
+  files.
+
+- **lfs_patterns**: here `default` and `none` are special keywords. This tool
+  contains a big list of default binary files that you might want to use, so
+  feel free to leave it as is. Otherwise you can specify a list of
+  comma-separated patterns or extensions like ("png, jpeg, path/to/file*, gif").
+
+- **extra_lfs_patterns**: here you should add a list of patterns or file names
+  that you'd like to be part of LFS. This is separated from `lfs_patterns` so
+  that default list can be easily used.
+
+Please note that if you only want to search and replace in history or delete
+files, while this tool can do the job if you disable LFS, all commits will be
+rewritten, and this tool does not handle branches. You might want to use git
+itself.
+
 ### migrate
 
-
+Migrate mode performs the actual migration, based on the configuration files
+created in the analysis phase
 
 ## License
 

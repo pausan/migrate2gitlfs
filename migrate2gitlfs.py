@@ -29,6 +29,11 @@ import fnmatch
 import time
 from datetime import datetime
 
+KW_SEARCH = 'search'
+KW_REPLACE = 'replace'
+KW_NONE = 'none'
+KW_DEFAULT = 'default'
+
 # Compiled non-exhaustive list of typical binary files
 # if has '*' that pattern will be treated as is, otherwise like na extension
 GITATTRIBUTES_DEFAULT_LFS_PATTERNS = """
@@ -98,6 +103,13 @@ def gitAttributesLfsFromPatterns(patternsString):
 
   It puts each pattern/extension in a new line and adds the LFS attributes
   """
+  # treat special keywords
+  if patternsString == KW_NONE:
+    return ''
+
+  elif patternsString == KW_DEFAULT:
+    return gitAttributesLfsFromPatterns(GITATTRIBUTES_DEFAULT_LFS_PATTERNS)
+
   gitattributes_list = []
   for line in patternsString.strip().split('\n'):
     line = line.strip()
@@ -148,8 +160,6 @@ def checkRequirements(origin_repo_path, branch_name):
     print ("      Multiple branches is not supported")
     return True
 
-  # TODO: check if src/target exist and you'd like to overwrite
-
   return True
 
 def initRepositories(origin_repo_path, cloned_repo_path, target_repo_path):
@@ -185,6 +195,19 @@ def scan(path):
       all_files.add(file_path)
 
   return all_files
+
+def fileInplaceSearchAndReplace(file_path, search_text, replace_text):
+  """ Read file, replace all search_text instances by replace_text and save file
+  """
+  search_text = search_text.encode()
+  replace_text = replace_text.encode()
+
+  with open(file_path, "r+b") as f:
+    data = f.read().replace(search_text, replace_text)
+    f.seek(0, os.SEEK_SET)
+    f.write(data)
+    
+  return
 
 def replayCommitTags(
   cloned_repo,
@@ -239,6 +262,7 @@ def replayCommits(
   git_attributes_contents,
   authors_mapping,
   files_to_delete,
+  files_to_replace,
   verbose
 ):
   """
@@ -303,6 +327,11 @@ def replayCommits(
           try: os.removedirs(os.path.dirname(file))
           except: pass
 
+      for file in files_to_replace.keys():
+        if os.path.isfile(file):
+          what_to_replace = files_to_replace[file]
+          fileInplaceSearchAndReplace(file, what_to_replace['search'], what_to_replace['replace'])
+
     else:
       #for diff_del in commit.diff(previous_commit):
       for what in previous_commit.diff(commit):
@@ -321,10 +350,14 @@ def replayCommits(
             os.makedirs(os.path.dirname(target_file), exist_ok = True)
             shutil.copy2(source_file, target_file)
 
-            if what.a_path in files_to_delete:
+            if what.a_path in files_to_delete and os.path.exists(target_file):
               os.unlink(target_file)
               try: os.removedirs(os.path.dirname(target_file))
               except: pass
+
+            if what.a_path in files_to_replace and os.path.isfile(target_file):
+              what_to_replace = files_to_replace[what.a_path]
+              fileInplaceSearchAndReplace(target_file, what_to_replace['search'], what_to_replace['replace'])
 
           # deleted, delete from target
           case 'D':
@@ -348,7 +381,7 @@ def replayCommits(
             try:    os.removedirs(os.path.dirname(source_file))
             except: pass
 
-            if what.b_path in files_to_delete:
+            if what.b_path in files_to_delete and os.path.exsits(target_file):
               os.unlink(target_file)
               try: os.removedirs(os.path.dirname(target_file))
               except: pass
@@ -466,20 +499,19 @@ def analyzeGitRepository(repo_path, branch_name):
 
     previous_commit = commit
 
-  # TODO:
-  # 'history_replace_files' : [ {
-  #   'path/to/secrets.json' : {
-  #     'search' : 'secret',
-  #     'replace' : 'xxxx'
-  #   }
-  # }],
   return {
     'authors' : authors_mapping,
     'warnings' : warnings,
     'history_delete_files' : [
       'path/file/to/be/removed.json'
     ],
-    'lfs_patterns' : 'default',
+    'history_replace_files' : {
+      'path/to/secrets.json' : {
+        KW_SEARCH : 'case-sensitive-string-to-search',
+        KW_REPLACE : 'xxxx'
+      }
+    },
+    'lfs_patterns' : KW_DEFAULT,
     'extra_lfs_patterns' : sorted(list(extra_lfs_patterns))
   }
 
@@ -489,7 +521,7 @@ def mainAnalyzeRepo(origin_repo_path, branch, config_file):
   print (f"Analyzing repo: {origin_repo_path}")
   config = analyzeGitRepository(origin_repo_path, branch)
 
-  print (f"Writing file: {config_file}")
+  print (f"Writing config file: {config_file}")
   if os.path.exists(config_file):
     with open(config_file, "rt") as f:
       org_config = json.load(f)
@@ -547,11 +579,10 @@ Examples:
   origin_repo_path = args.origin_repo_path
   if not os.path.exists(origin_repo_path):
     local_repo = os.path.abspath(os.path.basename(origin_repo_path))
-    if os.path.exists(local_repo):
-      origin_repo_path = local_repo
-    else:
-      print ("Cloning remote desktop into: {origin_repo}")
+    if not os.path.exists(local_repo):
+      print (f"Cloning remote desktop into: {local_repo}")
       subprocess.check_call(['git', 'clone', '--mirror', args.origin_repo_path, local_repo])
+    origin_repo_path = local_repo
 
   origin_repo_path = os.path.abspath(origin_repo_path)
   cloned_repo_path = origin_repo_path + '-clone'
@@ -560,6 +591,7 @@ Examples:
 
   authors_mapping = {}
   files_to_delete = set()
+  files_to_replace = {}
   git_attributes_content = gitAttributesLfsFromPatterns(GITATTRIBUTES_DEFAULT_LFS_PATTERNS)
 
   if not args.config:
@@ -584,9 +616,15 @@ Examples:
     authors_mapping = data.get('authors', {})
     files_to_delete = set(data.get('history_delete_files', []))
 
-    lfs_patterns = data.get('lfs_patterns', 'default')
-    if lfs_patterns != 'default':
-      git_attributes_content = gitAttributesLfsFromPatterns(lfs_patterns)
+    # normalize input
+    files_to_replace = {}
+    files_to_replace_raw = data.get('history_replace_files', {})
+    for [file, kv] in files_to_replace_raw.items():
+      if isinstance(kv, dict) and KW_SEARCH in kv and KW_REPLACE in kv:
+        files_to_replace[file] = kv
+
+    lfs_patterns = data.get('lfs_patterns', KW_DEFAULT)
+    git_attributes_content = gitAttributesLfsFromPatterns(lfs_patterns)
 
     extra_lfs_patterns = data.get('extra_lfs_patterns', None)
     if extra_lfs_patterns:
@@ -612,6 +650,7 @@ Examples:
     git_attributes_content,
     authors_mapping,
     files_to_delete,
+    files_to_replace,
     args.verbose
   ):
     print ("Exit: Could not replay commits \\_/(O_o)\\_/")
@@ -620,6 +659,10 @@ Examples:
   if args.verbose:
     print("Your LFS repo is ready:")
     print(target_repo_path)
+    print("Next steps:")
+    print("  git remote add origin git@server.com:path/{os.path.basename(target_repo_path)}.git")
+    print("  git branch -M {args.branch}")
+    print("  git push -u origin {args.branch}")
 
   # everything ok!
   sys.exit(0)
