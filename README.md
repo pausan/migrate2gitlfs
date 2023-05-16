@@ -1,6 +1,9 @@
 # migrate2gitlfs
 
-Simple and quick migration script to convert a git repo into git lfs.
+Simple and quick migration script to convert a simple linear git repo into
+git lfs.
+
+Read caveats for more info.
 
 ## Quick start
 
@@ -75,8 +78,10 @@ This tool has some features and caveats you should be aware of.
 **Caveats:**
 
   - History is rewritten (commit hashes change)
-  - Only projects with one branch can be migrated
-  - Special tags to blogs or trees (unusual) are lost
+  - Only one branch will be migrated
+  - All commits will be rebased as if all commits happened on one branch
+  - Special tags such as blobs or trees are lost (unusual to have them, but
+    anyway)
 
 ## Modes
 

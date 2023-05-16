@@ -401,7 +401,8 @@ def replayCommits(
       target_git.add('.')
       target_git.commit(
         '--no-verify',
-        '--allow-empty-message',
+        '--allow-empty', # prevent issues in merge commits
+        '--allow-empty-message', # just in case
         '-m', commit.message
       )
 
