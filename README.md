@@ -28,12 +28,14 @@ folders will be created:
 
 - ./cblack.git
 - ./cblack.git-config.json
-- ./cblack.git-config.json
+- ./cblack.git-clone
+- ./cblack.git-lfs
 
 Three repositories will be created. Speed and simplicity comes at a cost with
-this tool, you'll need 3x the space. The original repo (which will remain
-untouched), the cloned repo, on which commits will be replayed, and the lfs
-repo, which is the final LFS repo with the rewritten history.
+this tool, you'll need at most 3x the space (usually less). The original repo
+(which will remain untouched), the cloned repo, on which commits will be
+replayed, and the lfs repo, which is the final LFS repo with the rewritten
+history.
 
 ## Intro
 
@@ -122,7 +124,7 @@ Sample:
       "replace": "xxxx"
     }
   },
-  "lfs_patterns": "default",
+  "lfs_patterns": ["default", "*.pyo"],
   "extra_lfs_patterns": [
     "path/to/large-binary-file",
     "*.bin"
@@ -145,18 +147,25 @@ Sample:
   specified the latter, only the latter will be deleted, thus, you should add
   all files. This field does not allow patterns, just full paths.
 
+  This field is NOT updated by analysis command.
+
 - **history_replace_files**: List of files and search/replace patterns to 
   perform a search and replace for specific case-sensitive patterns in specified
   files.
 
 - **lfs_patterns**: here `default` and `none` are special keywords. This tool
   contains a big list of default binary files that you might want to use, so
-  feel free to leave it as is. Otherwise you can specify a list of
-  comma-separated patterns or extensions like ("png, jpeg, path/to/file*, gif").
+  feel free to leave it as is (using default). Otherwise you can specify a list
+  of comma-separated patterns or extensions like ("png, jpeg, path/to/file*,
+  gif"), or just provide a extra json array with the patterns you'd like.
+
+  This field is NOT updated by analysis command (but its contents are used to
+  generate extra_lfs_patterns, everything not matching lfs_patterns will be
+  included in extra_lfs_patterns).
 
 - **extra_lfs_patterns**: here you should add a list of patterns or file names
   that you'd like to be part of LFS. This is separated from `lfs_patterns` so
-  that default list can be easily used.
+  that default list can be easily reused.
 
 Please note that if you only want to search and replace in history or delete
 files, while this tool can do the job if you disable LFS, all commits will be

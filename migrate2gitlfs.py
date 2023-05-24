@@ -27,6 +27,7 @@ import argparse
 import json
 import fnmatch
 import time
+import collections
 from datetime import datetime
 
 KW_SEARCH = 'search'
@@ -54,18 +55,18 @@ fbx, obj, max, blend, blender, dae, mb, ma, 3ds, dfx, c4d, lwo, lwo2, abc, 3dm, 
 pdf, doc, docx, ppt, pptx, rtf, odt, xls, xlsx
 
 # Fonts
-ttf, otf, font
+ttc, ttf, otf, font, woff
 
 # Video
 mov, avi, asf, mpg, mpeg, mp4, flv, ogv, wmv
 
 # Executables
-slo, lo, o, obj, gch, pch, so, dylib, dll, lai, la, a, lib, exe, out, app
+slo, lo, o, obj, gch, pch, so, dylib, dll, lai, la, a, lib, exe, out, app, pdb, idb
 class, jar, war, ear, keystore, dex, apk
 dmg
 
 # Other binaries
-bin, dat, pak, pack
+bin, dat, pak, pack, nib, pyc, pyo, db
 
 # Unity
 cubemap
@@ -73,6 +74,16 @@ unitypackage
 *-[Tt]errain.asset
 *-[Nn]av[Mm]esh.asset
 """
+
+LFS_KNOWN_TEXT_EXTENSIONS = set([
+  "txt", "md", "csv", "json", "html", "css", "js"
+])
+
+def isKnownTextExtension(ext):
+  for x in LFS_KNOWN_TEXT_EXTENSIONS:
+    if ext.lower().endswith("." + x):
+      return True
+  return False
 
 def getPatternsFromPatternMultiline(patternsString):
   """ Parse all lines patternsString where each line can either start with a
@@ -90,7 +101,8 @@ def getPatternsFromPatternMultiline(patternsString):
     for ext in extensions:
       if not ext: continue
 
-      if '*' not in ext:
+      # looks like an extension (eg, not a path, not a pattern)
+      if ('*' not in ext) and ('/' not in ext):
         ext = f'*.{ext}'
 
       patterns.append(ext)
@@ -103,6 +115,17 @@ def gitAttributesLfsFromPatterns(patternsString):
 
   It puts each pattern/extension in a new line and adds the LFS attributes
   """
+  if isinstance(patternsString, (list, set, tuple)):
+    patternList = list(patternsString)
+    try:
+      defaultOffset = patternList.index(KW_DEFAULT)
+      patternList[defaultOffset] = GITATTRIBUTES_DEFAULT_LFS_PATTERNS
+      patternList.insert(defaultOffset+1, "\n# Custom patterns ")
+    except:
+      pass # default not found!
+
+    return gitAttributesLfsFromPatterns('\n'.join(patternList))
+
   # treat special keywords
   if patternsString == KW_NONE:
     return ''
@@ -121,10 +144,15 @@ def gitAttributesLfsFromPatterns(patternsString):
     for ext in extensions:
       if not ext: continue
 
-      if '*' not in ext:
+      # looks like an extension (eg, not a path, not a pattern)
+      if ('*' not in ext) and ('/' not in ext):
         ext = f'*.{ext}'
 
-      gitattributes_list.append(f'{ext:8s} filter=lfs diff=lfs merge=lfs binary')
+      gitattributes_list.append(
+        f"""{ext:8s} filter=lfs diff=lfs merge=lfs {
+          "text" if isKnownTextExtension(ext) else "binary"
+        }"""
+      )
 
   return '\n'.join(gitattributes_list)
 
@@ -306,7 +334,7 @@ def replayCommits(
     if verbose:
       date_string = datetime.utcfromtimestamp(commit.authored_date).strftime("%Y-%m-%d")
       short_message = commit.message.replace('\n', ' ').strip()[0:40]
-      sys.stdout.write(f"  [{n+1:5d}/{len(commits):5d}] {date_string} {commit.hexsha[0:8]} {author_name[0:16]:<16s} {short_message:<40}")
+      sys.stdout.write(f"  [{n+1:5d}/{len(commits):5d}] {date_string} {commit.hexsha[0:8]} {author_name[0:16]:<16s} {short_message:<40}...")
       sys.stdout.flush()
 
     cloned_git.checkout(commit.hexsha)
@@ -317,9 +345,14 @@ def replayCommits(
       shutil.copytree (
         cloned_repo_path,
         target_repo_path,
-        ignore = shutil.ignore_patterns(".git", ".git/**"),
+        ignore = shutil.ignore_patterns(".git", ".git/**", ".gitattributes"),
         dirs_exist_ok = True
       )
+
+      # TODO: decide what to do if a .gitattributes file is found
+      if os.path.join(cloned_repo_path, '.gitattributes'):
+        print(f"WARN: Found an existing .gitattributes in the first commit: {commit.hexsha[:8]}")
+        print(f"WARN: Existing .gitattributes will be ignored")
 
       for file in files_to_delete:
         if os.path.isfile(file):
@@ -336,6 +369,9 @@ def replayCommits(
       #for diff_del in commit.diff(previous_commit):
       for what in previous_commit.diff(commit):
         if what.a_path == '.gitattributes':
+          print(f"WARN: Found an existing .gitattributes in history: commit {commit.hexsha[:8]}")
+          print(f"WARN: Existing .gitattributes will be ignored")
+          continue
           # TODO: what operation is being done with it?
           # append given .gitattributes at the end??
           raise Exception ("FIXME! Existing .gitattributes found in history! Not implemented O_o")
@@ -423,18 +459,27 @@ def replayCommits(
   )
 
   # let's GC
-  target_git.reflog("expire", "--expire=now", "--all")
-  target_git.gc("--prune=now", "--aggressive")
+  # if verbose:
+  #   sys.stdout.write ("Cleanup & optimize git repo: reflog & gc")
+  #   sys.stdout.flush()
+
+  # start_time = time.time()
+  # target_git.reflog("expire", "--expire=now", "--all")
+  # target_git.gc("--prune=now", "--aggressive")
+
+  # end_time = time.time()
+  # if verbose:
+  #   print (f" (took {end_time - start_time:3.3f}s)")
 
   return True
 
-def looks_binary(lfs_patterns, file_name, file_size, read_stream):
+def looksBinary(lfs_patterns, file_name, file_size, read_stream):
   """ Returns True if given file looks binary
   """
   lfs_size_threshold = 1024*1024
 
   if len([p for p in lfs_patterns if fnmatch.fnmatch(file_name, p)]) > 0:
-    return False
+    return True
 
   # check files that won't be catched with patterns
   if file_size >= lfs_size_threshold:
@@ -446,7 +491,7 @@ def looks_binary(lfs_patterns, file_name, file_size, read_stream):
 
   return False
 
-def detect_sensitive_files(file_name):
+def detectSensitiveFiles(file_name):
   """ Returns a list of issues or empty list if no issues are found
   """
   for ext in ['.cer', '.key', '.p12', '.crt', '.pem']:
@@ -454,7 +499,7 @@ def detect_sensitive_files(file_name):
       return ['File can contain sensitive info: ' + file_name]
   return []
 
-def analyzeGitRepository(repo_path, branch_name):
+def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
   """ Analyze a git repository and extract authors mapping and LFS files
   """
   repo = git.Repo(repo_path)
@@ -462,13 +507,19 @@ def analyzeGitRepository(repo_path, branch_name):
   # all commits from older to newest
   commits = list(reversed(list(repo.iter_commits(branch_name))))
 
-  lfs_patterns = getPatternsFromPatternMultiline(GITATTRIBUTES_DEFAULT_LFS_PATTERNS)
-
   warnings = []
   authors_mapping = {}
-  extra_lfs_patterns = set()
+  lfs_file_commit_count = collections.Counter()
+  lfs_aggregated_file_size = collections.Counter()
+  lfs_files = set()
   previous_commit = None
   for n, commit in enumerate(commits):
+    if verbose:
+      date_string = datetime.utcfromtimestamp(commit.authored_date).strftime("%Y-%m-%d")
+      short_message = commit.message.replace('\n', ' ').strip()[0:40]
+      sys.stdout.write(f"\r  [{n+1:5d}/{len(commits):5d}] {date_string} {commit.hexsha[0:8]} {commit.author.name[0:16]:<16s} {short_message:<40}...")
+      sys.stdout.flush()
+
     author_key = f'{commit.author.name} <{commit.author.email}>'
     committer_key = f'{commit.committer.name} <{commit.committer.email}>'
 
@@ -487,18 +538,42 @@ def analyzeGitRepository(repo_path, branch_name):
         if blob.type != 'blob':
           continue
 
-        if looks_binary(lfs_patterns, blob.path, blob.size, blob.data_stream):
-          extra_lfs_patterns.add(blob.path)
+        if looksBinary(lfs_patterns, blob.path, blob.size, blob.data_stream):
+          lfs_aggregated_file_size[blob.path] += blob.size
+          lfs_file_commit_count[blob.path]+=1
+          lfs_files.add(blob.path)
 
-        warnings += detect_sensitive_files(blob.path)
+        warnings += detectSensitiveFiles(blob.path)
     else:
       for what in previous_commit.diff(commit):
-        if what.change_type == 'A':
-          if looks_binary(lfs_patterns, what.b_path, what.b_blob.size, what.b_blob.data_stream):
-            extra_lfs_patterns.add(what.b_path)
-          warnings += detect_sensitive_files(what.b_path)
+        # maybe a file is added first as text but later to binary, and still
+        # we'd like to treat it as binary
+        if what.change_type == 'A' or what.change_type == 'M':
+          if (
+            what.b_path in lfs_files
+            or looksBinary(lfs_patterns, what.b_path, what.b_blob.size, what.b_blob.data_stream)
+          ):
+            lfs_file_commit_count[what.b_path]+=1
+            lfs_aggregated_file_size[what.b_path] += what.b_blob.size
+            lfs_files.add(what.b_path)
+          warnings += detectSensitiveFiles(what.b_path)
 
     previous_commit = commit
+
+  # Warn if aggregated file size is more than 50MB, just for the user to be aware
+  for name, size in lfs_aggregated_file_size.most_common():
+    if size > 50*1024*1024:
+      warnings.append (f"Aggregated history of {name} is {size/(1024*1024):.2f}MB (in {lfs_file_commit_count[name]} commits)")
+
+  # from all files, get only the ones that won't be matched by the existing lfs patterns
+  extra_lfs_patterns = set()
+  for file_name in lfs_files:
+    if len([p for p in lfs_patterns if fnmatch.fnmatch(file_name, p)]) > 0:
+      continue
+    extra_lfs_patterns.add (file_name)
+
+  if verbose:
+    print ("")
 
   return {
     'authors' : authors_mapping,
@@ -516,13 +591,29 @@ def analyzeGitRepository(repo_path, branch_name):
     'extra_lfs_patterns' : sorted(list(extra_lfs_patterns))
   }
 
-def mainAnalyzeRepo(origin_repo_path, branch, config_file):
+def mainAnalyzeRepo(origin_repo_path, branch, config_file, verbose):
   """ Main entry point for analyzing repo
   """
   print (f"Analyzing repo: {origin_repo_path}")
-  config = analyzeGitRepository(origin_repo_path, branch)
+
+  lfs_patterns = getPatternsFromPatternMultiline(GITATTRIBUTES_DEFAULT_LFS_PATTERNS)
+  if os.path.exists(config_file):
+    with open(config_file, "rt") as f:
+      data = json.load(f)
+
+    # preserve LFS patterns
+    lfs_patterns = data.get('lfs_patterns', KW_DEFAULT)
+    if isinstance(lfs_patterns, list):
+      try:
+        defaultOffset = lfs_patterns.index(KW_DEFAULT)
+        lfs_patterns[defaultOffset:defaultOffset+1] = getPatternsFromPatternMultiline(GITATTRIBUTES_DEFAULT_LFS_PATTERNS)
+      except:
+        pass # default not found!
+
+  config = analyzeGitRepository(origin_repo_path, branch, lfs_patterns, verbose)
 
   print (f"Writing config file: {config_file}")
+
   if os.path.exists(config_file):
     with open(config_file, "rt") as f:
       org_config = json.load(f)
@@ -602,7 +693,8 @@ Examples:
     mainAnalyzeRepo(
       origin_repo_path,
       branch = args.branch,
-      config_file = args.config
+      config_file = args.config,
+      verbose = args.verbose
     )
     sys.exit(0)
   elif args.command != 'migrate':
