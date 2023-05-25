@@ -1,7 +1,10 @@
 # migrate2gitlfs
 
 Simple and quick migration script to convert a simple linear git repo into
-git lfs.
+git lfs in a non-destructive way.
+
+Non-destructive means all the action happens on a separate repository, the source
+repository is left unchanged.
 
 Read caveats for more info.
 
@@ -115,6 +118,9 @@ Sample:
   "warnings": [
     "File can contain sensitive info: path/to/secret.cer",
   ],
+  "history_rename_files": {
+    "search_string" : "replacement_string"
+  },
   "history_delete_files": [
     "path/file/to/be/removed.json"
   ],
@@ -140,6 +146,12 @@ Sample:
   converting this project into lfs. The warnings are in textual form. This tool
   might detect secret files that you might want to delete, but it is up to you
   to act on these warnings.
+
+- **history_rename_files**: Dictionary containing pairs of *search* and
+  *replacement* strings that will be applied to file names. This way you can
+  rename full paths, all file names or just static patterns when replaying
+  history. In the dict you can put several search/replacement pairs, but all
+  will be applied to all files in the history, so be careful.
 
 - **history_delete_files**: List of paths/files that you'd like to be deleted
   from history. Please note that only specified paths will be deleted. If a file

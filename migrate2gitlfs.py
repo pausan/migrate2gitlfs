@@ -283,12 +283,23 @@ def replayCommitTags(
         else:
           target_git.tag(tag.tag, target_hexsha)
 
+def multireplace(what, table_dict):
+  """ Replace multiple strings in what using given search and replace table
+  """
+  if not table_dict:
+    return what
+
+  for search, replacement in table_dict.items():
+    what = what.replace(search, replacement)
+  return what
+
 def replayCommits(
   cloned_repo_path,
   target_repo_path,
   branch_name,
   git_attributes_contents,
   authors_mapping,
+  files_to_rename,
   files_to_delete,
   files_to_replace,
   verbose
@@ -350,7 +361,7 @@ def replayCommits(
       )
 
       # TODO: decide what to do if a .gitattributes file is found
-      if os.path.join(cloned_repo_path, '.gitattributes'):
+      if os.path.exists(os.path.join(cloned_repo_path, '.gitattributes')):
         print(f"WARN: Found an existing .gitattributes in the first commit: {commit.hexsha[:8]}")
         print(f"WARN: Existing .gitattributes will be ignored")
 
@@ -365,6 +376,20 @@ def replayCommits(
           what_to_replace = files_to_replace[file]
           fileInplaceSearchAndReplace(file, what_to_replace['search'], what_to_replace['replace'])
 
+      if files_to_rename:
+        for root, dirs, files in os.walk(target_repo_path):
+          for name in dirs:
+            org_path = os.path.join(root, name)
+            new_path = multireplace (org_path, files_to_rename)
+            if org_path != new_path:
+              os.renames(org_path, new_path)
+
+        for root, dirs, files in os.walk(target_repo_path):
+          for name in files:
+            org_path = os.path.join(root, name)
+            new_path = multireplace (org_path, files_to_rename)
+            if org_path != new_path:
+              os.renames(org_path, new_path)
     else:
       #for diff_del in commit.diff(previous_commit):
       for what in previous_commit.diff(commit):
@@ -372,16 +397,14 @@ def replayCommits(
           print(f"WARN: Found an existing .gitattributes in history: commit {commit.hexsha[:8]}")
           print(f"WARN: Existing .gitattributes will be ignored")
           continue
-          # TODO: what operation is being done with it?
-          # append given .gitattributes at the end??
-          raise Exception ("FIXME! Existing .gitattributes found in history! Not implemented O_o")
 
         # print (what.change_type, what.a_path)
         match what.change_type:
           # file was added, or modified or type changed, then copy to target
           case 'A' | 'M' | 'T':
+            target_rel = multireplace (what.a_path, files_to_rename)
             source_file = os.path.join(cloned_repo_path, what.a_path)
-            target_file = os.path.join(target_repo_path, what.a_path)
+            target_file = os.path.join(target_repo_path, target_rel)
 
             os.makedirs(os.path.dirname(target_file), exist_ok = True)
             shutil.copy2(source_file, target_file)
@@ -397,7 +420,8 @@ def replayCommits(
 
           # deleted, delete from target
           case 'D':
-            file_path = os.path.join(target_repo_path, what.a_path)
+            file_path = multireplace (what.a_path, files_to_rename)
+            file_path = os.path.join(target_repo_path, file_path)
             os.unlink(file_path)
             try: os.removedirs(os.path.dirname(file_path))
             except: pass
@@ -408,11 +432,13 @@ def replayCommits(
               # thus we cannot rename it
               continue
 
-            source_file = os.path.join(target_repo_path, what.a_path)
-            target_file = os.path.join(target_repo_path, what.b_path)
+            source_rel = multireplace (what.a_path, files_to_rename)
+            target_rel = multireplace (what.b_path, files_to_rename)
 
-            os.makedirs(os.path.dirname(target_file), exist_ok = True)
-            os.rename(source_file, target_file)
+            source_file = os.path.join(target_repo_path, source_rel)
+            target_file = os.path.join(target_repo_path, target_rel)
+
+            os.renames(source_file, target_file)
 
             try:    os.removedirs(os.path.dirname(source_file))
             except: pass
@@ -494,10 +520,19 @@ def looksBinary(lfs_patterns, file_name, file_size, read_stream):
 def detectSensitiveFiles(file_name):
   """ Returns a list of issues or empty list if no issues are found
   """
+  warnings = []
+  if file_name == '.gitattributes':
+    warnings.append(f".gitattributes found in history. File will be ignored! Make sure your .gitattributes contais everything needed!")
+
   for ext in ['.cer', '.key', '.p12', '.crt', '.pem']:
     if file_name.endswith(ext):
-      return ['File can contain sensitive info: ' + file_name]
-  return []
+      warnings.append(f"File can contain sensitive info: {file_name}")
+
+  if '%' in file_name:
+    index = file_name.index('%')
+    warnings.append (f"At least a file contains '%' symbol: {file_name[index:index+3]} (see history_rename_files config if you'd like to rename them)")
+
+  return warnings
 
 def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
   """ Analyze a git repository and extract authors mapping and LFS files
@@ -507,7 +542,7 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
   # all commits from older to newest
   commits = list(reversed(list(repo.iter_commits(branch_name))))
 
-  warnings = []
+  warnings = set()
   authors_mapping = {}
   lfs_file_commit_count = collections.Counter()
   lfs_aggregated_file_size = collections.Counter()
@@ -543,7 +578,7 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
           lfs_file_commit_count[blob.path]+=1
           lfs_files.add(blob.path)
 
-        warnings += detectSensitiveFiles(blob.path)
+        warnings.update(detectSensitiveFiles(blob.path))
     else:
       for what in previous_commit.diff(commit):
         # maybe a file is added first as text but later to binary, and still
@@ -556,14 +591,14 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
             lfs_file_commit_count[what.b_path]+=1
             lfs_aggregated_file_size[what.b_path] += what.b_blob.size
             lfs_files.add(what.b_path)
-          warnings += detectSensitiveFiles(what.b_path)
+          warnings.update (detectSensitiveFiles(what.b_path))
 
     previous_commit = commit
 
   # Warn if aggregated file size is more than 50MB, just for the user to be aware
   for name, size in lfs_aggregated_file_size.most_common():
     if size > 50*1024*1024:
-      warnings.append (f"Aggregated history of {name} is {size/(1024*1024):.2f}MB (in {lfs_file_commit_count[name]} commits)")
+      warnings.add (f"Aggregated history of {name} is {size/(1024*1024):.2f}MB (in {lfs_file_commit_count[name]} commits)")
 
   # from all files, get only the ones that won't be matched by the existing lfs patterns
   extra_lfs_patterns = set()
@@ -577,11 +612,15 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
 
   return {
     'authors' : authors_mapping,
-    'warnings' : warnings,
-    'history_delete_files' : [
+    'warnings' : list(sorted(warnings)),
+    'sample:history_rename_files' : {
+      '%23': '#',
+      '%40': '@'
+    },
+    'sample:history_delete_files' : [
       'path/file/to/be/removed.json'
     ],
-    'history_replace_files' : {
+    'sample:history_replace_files' : {
       'path/to/secrets.json' : {
         KW_SEARCH : 'case-sensitive-string-to-search',
         KW_REPLACE : 'xxxx'
@@ -620,9 +659,11 @@ def mainAnalyzeRepo(origin_repo_path, branch, config_file, verbose):
       for key, value in org_config.get('authors', {}).items():
         config['authors'][key] = value
 
-      keys_to_preserve = ['lfs_patterns', 'history_delete_files'] # 'history_replace_files'
+      keys_to_preserve = ['lfs_patterns', 'history_rename_files', 'history_replace_files', 'history_delete_files']
       for k in keys_to_preserve:
-        config[k] = org_config.get(k, config.get(k, None))
+        if k in org_config:
+          config[k] = org_config.get(k, config.get(k, None))
+          config.pop (f'sample:{k}', None)
 
   with open(config_file, "wt") as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
@@ -637,7 +678,7 @@ def main():
   all commits with LFS
   """
   parser = argparse.ArgumentParser(
-    prog='git2lfs.py',
+    prog='migrate2gitlfs.py',
     formatter_class=argparse.RawTextHelpFormatter,
     description="""
 Quickly transform a git repository into git-lfs. Works only with local repos.
@@ -646,8 +687,8 @@ selecting files to be deleted from history
     """,
     epilog="""
 Examples:
-  $ python3 git2lfs.py analyze --config config.json my-git-repo-folder
-  $ python3 git2lfs.py migrate --config config.json  my-git-repo-folder
+  $ python3 migrate2gitlfs.py analyze --config config.json my-git-repo-folder
+  $ python3 migrate2gitlfs.py migrate --config config.json  my-git-repo-folder
     """
   )
 
@@ -716,6 +757,8 @@ Examples:
       if isinstance(kv, dict) and KW_SEARCH in kv and KW_REPLACE in kv:
         files_to_replace[file] = kv
 
+    files_to_rename = data.get('history_rename_files', {})
+
     lfs_patterns = data.get('lfs_patterns', KW_DEFAULT)
     git_attributes_content = gitAttributesLfsFromPatterns(lfs_patterns)
 
@@ -742,6 +785,7 @@ Examples:
     args.branch,
     git_attributes_content,
     authors_mapping,
+    files_to_rename,
     files_to_delete,
     files_to_replace,
     args.verbose
