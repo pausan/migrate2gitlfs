@@ -30,8 +30,6 @@ import time
 import collections
 from datetime import datetime
 
-KW_SEARCH = 'search'
-KW_REPLACE = 'replace'
 KW_NONE = 'none'
 KW_DEFAULT = 'default'
 
@@ -226,6 +224,9 @@ def scan(path):
 
 def fileInplaceSearchAndReplace(file_path, search_text, replace_text):
   """ Read file, replace all search_text instances by replace_text and save file
+
+  NOTE: we can do this with memory mapped files, but since the common case
+  would be with text files, we do it using read/write for simplicity/readability
   """
   search_text = search_text.encode()
   replace_text = replace_text.encode()
@@ -374,7 +375,8 @@ def replayCommits(
       for file in files_to_replace.keys():
         if os.path.isfile(file):
           what_to_replace = files_to_replace[file]
-          fileInplaceSearchAndReplace(file, what_to_replace['search'], what_to_replace['replace'])
+          for search, replace in what_to_replace.items():
+            fileInplaceSearchAndReplace(file, search, replace)
 
       if files_to_rename:
         for root, dirs, files in os.walk(target_repo_path):
@@ -416,7 +418,8 @@ def replayCommits(
 
             if what.a_path in files_to_replace and os.path.isfile(target_file):
               what_to_replace = files_to_replace[what.a_path]
-              fileInplaceSearchAndReplace(target_file, what_to_replace['search'], what_to_replace['replace'])
+              for search, replace in what_to_replace.items():
+                fileInplaceSearchAndReplace(target_file, search, replace)
 
           # deleted, delete from target
           case 'D':
@@ -620,10 +623,9 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
     'sample:history_delete_files' : [
       'path/file/to/be/removed.json'
     ],
-    'sample:history_replace_files' : {
+    'sample:history_replace_file_contents' : {
       'path/to/secrets.json' : {
-        KW_SEARCH : 'case-sensitive-string-to-search',
-        KW_REPLACE : 'xxxx'
+        'search_string' : 'replacement_string'
       }
     },
     'lfs_patterns' : KW_DEFAULT,
@@ -659,7 +661,7 @@ def mainAnalyzeRepo(origin_repo_path, branch, config_file, verbose):
       for key, value in org_config.get('authors', {}).items():
         config['authors'][key] = value
 
-      keys_to_preserve = ['lfs_patterns', 'history_rename_files', 'history_replace_files', 'history_delete_files']
+      keys_to_preserve = ['lfs_patterns', 'history_rename_files', 'history_replace_file_contents', 'history_delete_files']
       for k in keys_to_preserve:
         if k in org_config:
           config[k] = org_config.get(k, config.get(k, None))
@@ -748,16 +750,10 @@ Examples:
       data = json.load(f)
 
     authors_mapping = data.get('authors', {})
-    files_to_delete = set(data.get('history_delete_files', []))
-
-    # normalize input
-    files_to_replace = {}
-    files_to_replace_raw = data.get('history_replace_files', {})
-    for [file, kv] in files_to_replace_raw.items():
-      if isinstance(kv, dict) and KW_SEARCH in kv and KW_REPLACE in kv:
-        files_to_replace[file] = kv
 
     files_to_rename = data.get('history_rename_files', {})
+    files_to_delete = set(data.get('history_delete_files', []))
+    files_to_replace = data.get('history_replace_file_contents', {})
 
     lfs_patterns = data.get('lfs_patterns', KW_DEFAULT)
     git_attributes_content = gitAttributesLfsFromPatterns(lfs_patterns)

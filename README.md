@@ -124,10 +124,9 @@ Sample:
   "history_delete_files": [
     "path/file/to/be/removed.json"
   ],
-  "history_replace_files": {
+  "history_replace_file_contents": {
     "path/to/secrets.json": {
-      "search": "case-sensitive-string-to-search",
-      "replace": "xxxx"
+      "search_string": "replacement_string"
     }
   },
   "lfs_patterns": ["default", "*.pyo"],
@@ -161,9 +160,10 @@ Sample:
 
   This field is NOT updated by analysis command.
 
-- **history_replace_files**: List of files and search/replace patterns to 
-  perform a search and replace for specific case-sensitive patterns in specified
-  files.
+- **history_replace_file_contents**: List of files containing a dict of
+  search/replace pairs. The script will iterate through history doing a search
+  and replace inplace inside the file for specific search/replace patterns.
+  Files will be opened in binary mode, read in memory and written back to disk.
 
 - **lfs_patterns**: here `default` and `none` are special keywords. This tool
   contains a big list of default binary files that you might want to use, so
