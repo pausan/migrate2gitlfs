@@ -423,6 +423,11 @@ def replayCommits(
 
           # deleted, delete from target
           case 'D':
+            if what.a_path in files_to_delete:
+              # if source file is there, it should have been deleted,
+              # thus we cannot delete it again
+              continue
+
             file_path = multireplace (what.a_path, files_to_rename)
             file_path = os.path.join(target_repo_path, file_path)
             os.unlink(file_path)
