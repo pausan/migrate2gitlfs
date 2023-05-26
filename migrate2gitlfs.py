@@ -74,7 +74,8 @@ unitypackage
 """
 
 LFS_KNOWN_TEXT_EXTENSIONS = set([
-  "txt", "md", "csv", "json", "html", "css", "js"
+  "txt", "md", "csv", "json", "html", "xml", "css", "js",
+  "c", "h", "cxx", "cc", "cpp"
 ])
 
 def isKnownTextExtension(ext):
