@@ -451,6 +451,12 @@ def replayCommits(
             try:    os.removedirs(os.path.dirname(source_file))
             except: pass
 
+            # renamed files might contain changes as well, we need to copy
+            # from source
+            source_file = os.path.join(cloned_repo_path, target_rel)
+            target_file = os.path.join(target_repo_path, target_rel)
+            shutil.copy2(source_file, target_file)
+
             if what.b_path in files_to_delete and os.path.exsits(target_file):
               os.unlink(target_file)
               try: os.removedirs(os.path.dirname(target_file))
