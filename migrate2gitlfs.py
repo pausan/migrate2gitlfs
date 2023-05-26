@@ -538,7 +538,7 @@ def detectSensitiveFiles(file_name):
   if file_name == '.gitattributes':
     warnings.append(f".gitattributes found in history. File will be ignored! Make sure your .gitattributes contais everything needed!")
 
-  for ext in ['.cer', '.key', '.p12', '.crt', '.pem']:
+  for ext in ['.cer', '.key', '.p12', '.crt', '.pem', '.jks']:
     if file_name.endswith(ext):
       warnings.append(f"File can contain sensitive info: {file_name}")
 
