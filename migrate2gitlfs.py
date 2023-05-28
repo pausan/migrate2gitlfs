@@ -18,6 +18,7 @@
 # This code assumes git LFS has already been installed for the current user
 # (otherwise just run "git lfs install")
 #
+import re
 import os
 import sys
 import shutil
@@ -329,6 +330,9 @@ def replayCommits(
     f.write('\n')
     f.write(git_attributes_contents)
 
+  files_to_delete_patterns = [fnmatch.translate(p) for p in files_to_delete]
+  files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+
   # all commits from older to newest
   commits = list(reversed(list(cloned_repo.iter_commits(branch_name))))
   cloned_git = cloned_repo.git
@@ -362,7 +366,7 @@ def replayCommits(
       shutil.copytree (
         cloned_repo_path,
         target_repo_path,
-        ignore = shutil.ignore_patterns(".git", ".git/**", ".gitattributes"),
+        ignore = shutil.ignore_patterns(".git", ".git/**", ".gitattributes", *files_to_delete),
         dirs_exist_ok = True
       )
 
@@ -370,12 +374,6 @@ def replayCommits(
       if os.path.exists(os.path.join(cloned_repo_path, '.gitattributes')):
         print(f"WARN: Found an existing .gitattributes in the first commit: {commit.hexsha[:8]}")
         print(f"WARN: Existing .gitattributes will be ignored")
-
-      for file in files_to_delete:
-        if os.path.isfile(file):
-          os.unlink(file)
-          try: os.removedirs(os.path.dirname(file))
-          except: pass
 
       for file in files_to_replace.keys():
         if os.path.isfile(file):
@@ -414,9 +412,9 @@ def replayCommits(
             target_file = os.path.join(target_repo_path, target_rel)
 
             os.makedirs(os.path.dirname(target_file), exist_ok = True)
-            shutil.copy2(source_file, target_file)
+            shutil.copy2(source_file, target_file, follow_symlinks = False)
 
-            if what.a_path in files_to_delete and os.path.exists(target_file):
+            if files_to_delete_regex.match(what.a_path) and os.path.exists(target_file):
               os.unlink(target_file)
               try: os.removedirs(os.path.dirname(target_file))
               except: pass
@@ -428,7 +426,7 @@ def replayCommits(
 
           # deleted, delete from target
           case 'D':
-            if what.a_path in files_to_delete:
+            if files_to_delete_regex.match(what.a_path):
               # if source file is there, it should have been deleted,
               # thus we cannot delete it again
               continue
@@ -440,7 +438,7 @@ def replayCommits(
             except: pass
 
           case 'R':
-            if what.a_path in files_to_delete:
+            if files_to_delete_regex.match(what.a_path):
               # if source file is there, it should have been deleted,
               # thus we cannot rename it
               continue
@@ -457,12 +455,12 @@ def replayCommits(
             except: pass
 
             # renamed files might contain changes as well, we need to copy
-            # from source
-            source_file = os.path.join(cloned_repo_path, target_rel)
+            # file data from cloned repo
+            source_file = os.path.join(cloned_repo_path, what.b_path)
             target_file = os.path.join(target_repo_path, target_rel)
-            shutil.copy2(source_file, target_file)
+            shutil.copy2(source_file, target_file, follow_symlinks = False)
 
-            if what.b_path in files_to_delete and os.path.exsits(target_file):
+            if files_to_delete_regex.match(what.b_path) and os.path.exists(target_file):
               os.unlink(target_file)
               try: os.removedirs(os.path.dirname(target_file))
               except: pass
@@ -543,7 +541,7 @@ def detectSensitiveFiles(file_name):
   if file_name == '.gitattributes':
     warnings.append(f".gitattributes found in history. File will be ignored! Make sure your .gitattributes contais everything needed!")
 
-  for ext in ['.cer', '.key', '.p12', '.crt', '.pem', '.jks']:
+  for ext in ['.cer', '.key', '.p12', '.crt', '.pem', '.jks', '.pfx']:
     if file_name.endswith(ext):
       warnings.append(f"File can contain sensitive info: {file_name}")
 
@@ -688,6 +686,38 @@ def mainAnalyzeRepo(origin_repo_path, branch, config_file, verbose):
 
   return True
 
+
+def showDeleted(repo_path, branch_name, files_to_delete):
+  """ Iterate through git history and show which files will be removed
+  from history along with first commit where they appear
+  """
+  repo = git.Repo(repo_path)
+
+  # all commits from older to newest
+  commits = list(reversed(list(repo.iter_commits(branch_name))))
+
+  files_to_delete_patterns = [fnmatch.translate(p) for p in files_to_delete]
+  files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+
+  total_size = 0
+  files_reported = set()
+  for n, commit in enumerate(commits):
+    for blob in commit.tree.traverse():
+      if blob.type != 'blob':
+        continue
+
+      if blob.path in files_reported:
+        continue
+
+      if files_to_delete_regex.match(blob.path):
+        print (f"{commit.hexsha[:8]} {blob.path}")
+        files_reported.add(blob.path)
+        total_size += blob.size
+
+  print(f"Total: {len(files_reported)} files deleted (at least {total_size/1e6:.2f}MB to be saved)")
+  return
+
+
 def main():
   """
   Main application
@@ -718,8 +748,11 @@ Examples:
 
   parser_analyze = subparsers.add_parser('analyze', help='Analyzes git history and generates a JSON file with authors mapping and LFS candidate patterns that you can tweak')
   parser_migrate = subparsers.add_parser('migrate', help='Migrates git history to LFS using given config file (or using default LFS patterns)')
+  parser_show_ga = subparsers.add_parser('show', help='Show gitattributes or files to be deleted')
 
-  for p in [parser_analyze, parser_migrate]:
+  parser_show_ga.add_argument('what', help="gitattributes | deleted")
+
+  for p in [parser_analyze, parser_migrate, parser_show_ga]:
     p.add_argument('--branch', default='master', help="Which is the branch to migrate")
     p.add_argument('--config', default='', help="Use JSON configuration file with authors & lfs patterns. Create config with --analyze")
     p.add_argument('-v', '--verbose', action='store_true')
@@ -756,7 +789,7 @@ Examples:
       verbose = args.verbose
     )
     sys.exit(0)
-  elif args.command != 'migrate':
+  elif args.command != 'migrate' and args.command != 'show':
     print ("Only analyze or migrate subcommands are supported")
     sys.exit(-1)
 
@@ -782,6 +815,14 @@ Examples:
         extra,
         "\n# Project Specific"
       )
+
+  if args.command == 'show':
+    if args.what == 'gitattributes':
+      print(git_attributes_content)
+    elif args.what == 'deleted':
+      print("Files to be deleted from history:")
+      showDeleted(origin_repo_path, args.branch, files_to_delete)
+    sys.exit(0)
 
   if not checkRequirements(origin_repo_path, args.branch):
     print("Exit: Some requirements have not been met. Please review other errors.")

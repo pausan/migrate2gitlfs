@@ -8,6 +8,9 @@ repository is left unchanged.
 
 Read caveats for more info.
 
+Even if you plan to use `git lfs migrate` later, the analysis command might
+actually help you analyze the repo.
+
 ## Quick start
 
 First analyze the repository to let the tool find out LFS candidate files,
@@ -64,7 +67,8 @@ It only works with one branch though.
 
 Since it replays the whole commit history, commit by commit, it is very easy to
 change history as well. Things such as renaming authors, deleting files from
-history and replacing text in specified files.
+history and replacing text in specific files. This script has support for all
+that.
 
 ## Features & caveats
 
@@ -72,25 +76,27 @@ This tool has some features and caveats you should be aware of.
 
 **Features:**
 
-  - Migrates master/main branch
+  - Migrates a single branch
   - Preserves:
     - Commits (all info: authors, dates and messages)
     - Commit tags (authors, dates and messages)
   - Specified patterns are added as LFS
   - Removes specific files from history
   - Analyzes commit history looking for LFS files and secrets files
+  - Normal tags are preserved
 
 **Caveats:**
 
-  - History is rewritten (commit hashes change)
+  - History is rewritten
+  - All commit hashes change
   - Only one branch will be migrated
   - All commits will be rebased as if all commits happened on one branch
-  - Special tags such as blobs or trees are lost (unusual to have them, but
+  - Special "tags" such as blobs or trees are lost (unusual to have them, but
     anyway)
 
 ## Modes
 
-It contains two modes. `analyze` mode and `migrate` mode
+It contains three modes. `analyze` mode, `migrate` mode and `show` mode.
 
 ### analyze
 
@@ -102,8 +108,8 @@ contain other files.
 This mode will also find candidate files to be deleted and/or will warn you
 about other stuff.
 
-After you run this mode, you can edit the json file in order to set your
-preferences and adjust migrate behavoiur.
+After you run this mode, **you should proceed to review and edit the json file**
+in order to set your preferences and adjust the parameters for the migration.
 
 Sample:
 
@@ -183,6 +189,23 @@ Please note that if you only want to search and replace in history or delete
 files, while this tool can do the job if you disable LFS, all commits will be
 rewritten, and this tool does not handle branches. You might want to use git
 itself.
+
+### show
+
+- **gitattributes**: use this parameter to show the final .gitattributes file
+  that will be used for the project.
+
+- **deleted**: use this parameter to show all the files that are going to
+  be removed throught the whole history. It will show the first commit
+  in which such files appear and a guess on the minimum space to be freed (this
+  is just orientative).
+
+Example:
+
+```sh
+$ python3 migrate2gitlfs.py show gitattributes -v local_repo
+$ python3 migrate2gitlfs.py show deleted -v local_repo
+```
 
 ### migrate
 
