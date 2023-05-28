@@ -44,7 +44,7 @@ mp3, m4a, ogg, wav, aiff, aif, mod, it, s3m, xm
 
 # Image
 jpg, jpeg, png, apng, atsc, gif, bmp, ico, exr, tga, tiff, tif, iff, pict, dds, xcf, leo, kra, kpp, clip, webm, webp, svg, svgz, psd, afphoto, afdesign, qoi
-ai, psd, dwg
+ai, dwg
 
 # 3D
 fbx, obj, max, blend, blender, dae, mb, ma, 3ds, dfx, c4d, lwo, lwo2, abc, 3dm, bin, glb
@@ -146,6 +146,10 @@ def gitAttributesLfsFromPatterns(patternsString):
       # looks like an extension (eg, not a path, not a pattern)
       if ('*' not in ext) and ('/' not in ext):
         ext = f'*.{ext}'
+
+      # escape backslashes, paces and quotes
+      if ' ' in ext or '"' in ext or '\\' in ext:
+        ext = ext.replace('\\', '\\\\').replace(' ', '\\ ').replace('"', '\\"')
 
       gitattributes_list.append(
         f"""{ext:8s} filter=lfs diff=lfs merge=lfs {
@@ -627,7 +631,6 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
 
   return {
     'authors' : authors_mapping,
-    'warnings' : list(sorted(warnings)),
     'sample:history_rename_files' : {
       '%23': '#',
       '%40': '@'
@@ -641,7 +644,8 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
       }
     },
     'lfs_patterns' : KW_DEFAULT,
-    'extra_lfs_patterns' : sorted(list(extra_lfs_patterns))
+    'extra_lfs_patterns' : sorted(list(extra_lfs_patterns)),
+    'warnings' : list(sorted(warnings)),
   }
 
 def mainAnalyzeRepo(origin_repo_path, branch, config_file, verbose):
