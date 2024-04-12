@@ -11,6 +11,14 @@ Read caveats for more info.
 Even if you plan to use `git lfs migrate` later, the analysis command might
 actually help you analyze the repo.
 
+## Before you start
+
+Install requirements (GitPython):
+
+```sh
+$ python3 -m pip install -r requirements.txt
+```
+
 ## Quick start
 
 First analyze the repository to let the tool find out LFS candidate files,
