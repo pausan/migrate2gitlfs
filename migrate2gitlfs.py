@@ -148,9 +148,14 @@ def gitAttributesLfsFromPatterns(patternsString):
       if ('*' not in ext) and ('/' not in ext):
         ext = f'*.{ext}'
 
-      # escape backslashes, paces and quotes
+      # escape backslashes, spaces and quotes
+      # in that case, we need to wrap everything into double quotes, as per
+      # the .gitattributes documentation:
+      #   > Patterns that begin with a double quote are quoted in C style.
+      #
+      # For spaces, we might as well replace them by '[[:space:]]'
       if ' ' in ext or '"' in ext or '\\' in ext:
-        ext = ext.replace('\\', '\\\\').replace(' ', '\\ ').replace('"', '\\"')
+        ext = "\"" + ext.replace('\\', '\\\\').replace('"', '\\"') + "\""
 
       gitattributes_list.append(
         f"""{ext:8s} filter=lfs diff=lfs merge=lfs {
@@ -433,7 +438,8 @@ def replayCommits(
 
             file_path = multireplace (what.a_path, files_to_rename)
             file_path = os.path.join(target_repo_path, file_path)
-            os.unlink(file_path)
+            try: os.unlink(file_path)
+            except: pass
             try: os.removedirs(os.path.dirname(file_path))
             except: pass
 
@@ -736,7 +742,9 @@ selecting files to be deleted from history
     epilog="""
 Examples:
   $ python3 migrate2gitlfs.py analyze --config config.json my-git-repo-folder
-  $ python3 migrate2gitlfs.py migrate --config config.json  my-git-repo-folder
+  $ python3 migrate2gitlfs.py migrate --config config.json my-git-repo-folder
+  $ python3 migrate2gitlfs.py show gitattributes my-git-repo-folder
+  $ python3 migrate2gitlfs.py show deleted my-git-repo-folder
     """
   )
 
