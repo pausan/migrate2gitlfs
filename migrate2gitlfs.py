@@ -29,7 +29,7 @@ import json
 import fnmatch
 import time
 import collections
-from datetime import datetime
+from datetime import datetime, timezone
 
 KW_NONE = 'none'
 KW_DEFAULT = 'default'
@@ -246,7 +246,7 @@ def fileInplaceSearchAndReplace(file_path, search_text, replace_text):
     data = f.read().replace(search_text, replace_text)
     f.seek(0, os.SEEK_SET)
     f.write(data)
-    
+
   return
 
 def replayCommitTags(
@@ -336,14 +336,16 @@ def replayCommits(
     f.write(git_attributes_contents)
 
   files_to_delete_patterns = [fnmatch.translate(p) for p in files_to_delete]
-  files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+  if files_to_delete_patterns:
+    files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+  else:
+    files_to_delete_regex = re.compile(r'\b\B') # matches nothing
 
   # all commits from older to newest
   commits = list(reversed(list(cloned_repo.iter_commits(branch_name))))
   cloned_git = cloned_repo.git
   target_git = target_repo.git
 
-  previous_files = None
   previous_commit = None
   commit_mapping = {}
   for n, commit in enumerate(commits):
@@ -358,7 +360,7 @@ def replayCommits(
     committer_email = authors_mapping.get(committer_key, {'email': commit.committer.email}).get('email')
 
     if verbose:
-      date_string = datetime.utcfromtimestamp(commit.authored_date).strftime("%Y-%m-%d")
+      date_string = datetime.fromtimestamp(commit.authored_date, timezone.utc).strftime("%Y-%m-%d")
       short_message = commit.message.replace('\n', ' ').strip()[0:40]
       sys.stdout.write(f"  [{n+1:5d}/{len(commits):5d}] {date_string} {commit.hexsha[0:8]} {author_name[0:16]:<16s} {short_message:<40}...")
       sys.stdout.flush()
@@ -573,7 +575,7 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
   previous_commit = None
   for n, commit in enumerate(commits):
     if verbose:
-      date_string = datetime.utcfromtimestamp(commit.authored_date).strftime("%Y-%m-%d")
+      date_string = datetime.fromtimestamp(commit.authored_date, timezone.utc).strftime("%Y-%m-%d")
       short_message = commit.message.replace('\n', ' ').strip()[0:40]
       sys.stdout.write(f"\r  [{n+1:5d}/{len(commits):5d}] {date_string} {commit.hexsha[0:8]} {commit.author.name[0:16]:<16s} {short_message:<40}...")
       sys.stdout.flush()
@@ -703,7 +705,10 @@ def showDeleted(repo_path, branch_name, files_to_delete):
   commits = list(reversed(list(repo.iter_commits(branch_name))))
 
   files_to_delete_patterns = [fnmatch.translate(p) for p in files_to_delete]
-  files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+  if files_to_delete_patterns:
+    files_to_delete_regex = re.compile('|'.join(files_to_delete_patterns))
+  else:
+    files_to_delete_regex = re.compile(r'\b\B') # matches nothing
 
   total_size = 0
   files_reported = set()
@@ -742,7 +747,7 @@ selecting files to be deleted from history
     epilog="""
 Examples:
   $ python3 migrate2gitlfs.py analyze --config config.json my-git-repo-folder
-  $ python3 migrate2gitlfs.py migrate --config config.json my-git-repo-folder
+  $ python3 migrate2gitlfs.py migrate -v --config config.json my-git-repo-folder
   $ python3 migrate2gitlfs.py show gitattributes my-git-repo-folder
   $ python3 migrate2gitlfs.py show deleted my-git-repo-folder
     """
