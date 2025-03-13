@@ -34,6 +34,9 @@ from datetime import datetime, timezone
 KW_NONE = 'none'
 KW_DEFAULT = 'default'
 
+# This mode represents a git submodule, which is not supported by this tool
+GIT_MODE_SUBMODULE = git.index.fun.S_IFGITLINK
+
 # Compiled non-exhaustive list of typical binary files
 # if has '*' that pattern will be treated as is, otherwise like na extension
 GITATTRIBUTES_DEFAULT_LFS_PATTERNS = """
@@ -606,6 +609,10 @@ def analyzeGitRepository(repo_path, branch_name, lfs_patterns, verbose):
         warnings.update(detectSensitiveFiles(blob.path))
     else:
       for what in previous_commit.diff(commit):
+        if what.a_mode == GIT_MODE_SUBMODULE or what.b_mode == GIT_MODE_SUBMODULE:
+          print(f"Skipping submodule: {what.b_path}")
+          continue
+
         # maybe a file is added first as text but later to binary, and still
         # we'd like to treat it as binary
         if what.change_type == 'A' or what.change_type == 'M':
